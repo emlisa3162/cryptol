@@ -17,6 +17,7 @@ module Cryptol.Parser.ParserUtils where
 
 import Data.Maybe(fromMaybe)
 import Data.Bits(testBit,setBit)
+import Data.List(foldl')
 import Data.List.NonEmpty ( NonEmpty(..) )
 import qualified Data.List.NonEmpty as NE
 import Control.Monad(liftM,ap,unless,guard)
@@ -806,6 +807,32 @@ mkNested m =
   where
   nm = mName m
   r = srcRange nm
+
+mkSigDecl :: Maybe (Located Text) -> Signature PName -> TopDecl PName
+mkSigDecl doc sig =
+  DModSig
+  TopLevel { tlExport = Public
+           , tlDoc    = doc
+           , tlValue  = sig
+           }
+
+mkSignature :: LPName -> [TopDecl PName] -> Signature PName
+mkSignature nm =
+  foldl' add
+  Signature { sigName        = nm
+            , sigTypeParams  = []
+            , sigConstraints = []
+            , sigFunParams   = []
+            }
+
+  where
+  add s d =
+    case d of
+      DParameterType pt -> s { sigTypeParams = pt : sigTypeParams s }
+      DParameterConstraint ps -> s { sigConstraints = ps ++ sigConstraints s }
+      DParameterFun pf -> s { sigFunParams = pf : sigFunParams s }
+      _ -> panic "mkSignature" ["Unexpected top-level declaration"]
+ 
 
 -- | Make an unnamed module---gets the name @Main@.
 mkAnonymousModule :: [TopDecl PName] -> Module PName
