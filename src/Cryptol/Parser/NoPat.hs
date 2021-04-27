@@ -401,6 +401,8 @@ annotTopDs tds =
 
         DImport {} -> (d :) <$> annotTopDs ds
 
+        DModSig {} -> (d :) <$> annotTopDs ds
+
     [] -> return []
 
 

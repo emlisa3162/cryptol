@@ -18,19 +18,23 @@ modExports m = fold (concat [ exportedNames d | d <- mDecls m ])
   where
   names by td = [ td { tlValue = thing n } | n <- fst (by (tlValue td)) ]
 
-  exportedNames (Decl td) = map exportBind  (names  namesD td)
-                         ++ map exportType (names tnamesD td)
-  exportedNames (DPrimType t) = [ exportType (thing . primTName <$> t) ]
-  exportedNames (TDNewtype nt) = map exportType (names tnamesNT nt)
-  exportedNames (Include {})  = []
-  exportedNames (DImport {}) = []
-  exportedNames (DParameterFun {}) = []
-  exportedNames (DParameterType {}) = []
-  exportedNames (DParameterConstraint {}) = []
-  exportedNames (DModule nested) =
-    case tlValue nested of
-      NestedModule x ->
-        [exportName NSModule nested { tlValue = thing (mName x) }]
+  exportedNames decl =
+    case decl of
+      Decl td -> map exportBind  (names  namesD td)
+              ++ map exportType (names tnamesD td)
+      DPrimType t -> [ exportType (thing . primTName <$> t) ]
+      TDNewtype nt -> map exportType (names tnamesNT nt)
+      Include {}  -> []
+      DImport {} -> []
+      DParameterFun {} -> []
+      DParameterType {} -> []
+      DParameterConstraint {} -> []
+      DModule nested ->
+        case tlValue nested of
+          NestedModule x ->
+            [exportName NSModule nested { tlValue = thing (mName x) }]
+      DModSig s ->
+        [ exportName NSModule s { tlValue = thing (sigName (tlValue s)) } ]
 
 
 

@@ -59,6 +59,7 @@ module Cryptol.Parser.AST
   , ParameterType(..)
   , ParameterFun(..)
   , NestedModule(..)
+  , Signature(..)
 
     -- * Interactive
   , ReplInput(..)
@@ -176,6 +177,7 @@ data TopDecl name =
   | DParameterFun  (ParameterFun name)  -- ^ @parameter someVal : [256]@
   | DModule (TopLevel (NestedModule name))  -- ^ Nested module
   | DImport (Located (ImportG (ImpName name)))  -- ^ An import declaration
+  | DModSig (TopLevel (Signature name))
                     deriving (Show, Generic, NFData)
 
 data ImpName name =
@@ -211,6 +213,14 @@ data ParameterFun name = ParameterFun
   , pfSchema :: Schema name       -- ^ schema for parameter
   , pfDoc    :: Maybe Text        -- ^ optional documentation
   , pfFixity :: Maybe Fixity      -- ^ info for infix use
+  } deriving (Eq,Show,Generic,NFData)
+
+
+data Signature name = Signature
+  { sigName         :: Located name
+  , sigTypeParams   :: [ParameterType name]
+  , sigConstraints  :: [Located (Prop name)]
+  , sigFunParams    :: [ParameterFun name]
   } deriving (Eq,Show,Generic,NFData)
 
 
@@ -535,6 +545,10 @@ instance HasLoc (TopDecl name) where
       DParameterConstraint d -> getLoc d
       DModule d -> getLoc d
       DImport d -> getLoc d
+      DModSig d -> getLoc d
+
+instance HasLoc (Signature name) where
+  getLoc = getLoc . sigName
 
 instance HasLoc (PrimType name) where
   getLoc pt = Just (rComb (srcRange (primTName pt)) (srcRange (primTKind pt)))
@@ -624,6 +638,21 @@ instance (Show name, PPName name) => PP (TopDecl name) where
                        xs  -> parens (hsep (punctuate comma xs))
       DModule d -> pp d
       DImport i -> pp (thing i)
+      DModSig s -> pp s
+
+instance (Show name, PPName name) => PP (Signature name) where
+  ppPrec _ sig =
+    vcat [ "signature" <+> pp (sigName sig) <+> "where"
+         , nest 2 (vcat ds)
+         ]
+    where
+    ds = map pp (sigTypeParams sig)
+      ++ [ case map (pp . thing) (sigConstraints sig) of
+           [x] -> "type constraint" <+> x
+           []  -> empty
+           xs  -> "type constraint" <+> parens (hsep (punctuate comma xs))
+         ]
+      ++ map pp (sigFunParams sig)
 
 instance (Show name, PPName name) => PP (PrimType name) where
   ppPrec _ pt =
@@ -1015,7 +1044,14 @@ instance NoPos (TopDecl name) where
       DParameterConstraint d -> DParameterConstraint (noPos d)
       DModule d -> DModule (noPos d)
       DImport d -> DImport (noPos d)
+      DModSig d -> DModSig (noPos d)
 
+instance NoPos (Signature name) where
+  noPos sig = Signature { sigName = noPos (sigName sig)
+                        , sigTypeParams = map noPos (sigTypeParams sig)
+                        , sigConstraints = map noPos (sigConstraints sig)
+                        , sigFunParams = map noPos (sigFunParams sig)
+                        }
 
 instance NoPos (PrimType name) where
   noPos x = x

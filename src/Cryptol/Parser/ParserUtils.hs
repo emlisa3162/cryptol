@@ -513,6 +513,7 @@ changeExport e = map change
   change (DPrimType t) = DPrimType t { tlExport = e }
   change (TDNewtype n) = TDNewtype n { tlExport = e }
   change (DModule m)   = DModule   m { tlExport = e }
+  change (DModSig s)   = DModSig   s { tlExport = e }
   change td@Include{}  = td
   change td@DImport{}  = td
   change (DParameterType {}) = panic "changeExport" ["private type parameter?"]
