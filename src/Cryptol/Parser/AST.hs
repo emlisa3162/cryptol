@@ -177,8 +177,9 @@ data TopDecl name =
   | DParameterFun  (ParameterFun name)  -- ^ @parameter someVal : [256]@
   | DModule (TopLevel (NestedModule name))  -- ^ Nested module
   | DImport (Located (ImportG (ImpName name)))  -- ^ An import declaration
-  | DModSig (TopLevel (Signature name))
-                    deriving (Show, Generic, NFData)
+  | DModSig (TopLevel (Signature name))         -- ^ A module signature
+  | DModParam (ModParam name)                   -- ^ A functor parameter
+    deriving (Show, Generic, NFData)
 
 data ImpName name =
     ImpTop    ModName
@@ -216,12 +217,30 @@ data ParameterFun name = ParameterFun
   } deriving (Eq,Show,Generic,NFData)
 
 
+-- | Module signatures (aka types of functor arguments)
 data Signature name = Signature
-  { sigName         :: Located name
-  , sigTypeParams   :: [ParameterType name]
-  , sigConstraints  :: [Located (Prop name)]
-  , sigFunParams    :: [ParameterFun name]
+  { sigName         :: Located name             -- ^ Name of the signature
+  , sigTypeParams   :: [ParameterType name]     -- ^ Type parameters
+  , sigConstraints  :: [Located (Prop name)]    -- ^ Constraints on type params
+  , sigFunParams    :: [ParameterFun name]      -- ^ Value parameters
   } deriving (Eq,Show,Generic,NFData)
+
+{- | A module parameter declasration
+A functor may have either 1 unnamed parameter or multiple named parameters
+For the time being, unnamed parameters introduce the names from the
+signature unqualified, while the named version always adds them qualified,
+although we may want to add more control here -}
+data ModParam name = ModParam
+  { mpName          :: Maybe (Located name) -- ^ Name of parameter
+  , mpSignature     :: ModParamSig name     -- ^ Signature for parameter
+  , mpDoc           :: Maybe (Located Text) -- ^ Optional documentation
+  } deriving (Eq,Show,Generic,NFData)
+
+-- | The signature to use for a module parmater
+data ModParamSig name =
+    NamedSig (Located name)        -- ^ Use a pre-declared signature
+  | InlineSig (Signature name)     -- ^ Declare this signature and use it
+    deriving (Eq,Show,Generic,NFData)
 
 
 -- | An import declaration.
@@ -546,6 +565,20 @@ instance HasLoc (TopDecl name) where
       DModule d -> getLoc d
       DImport d -> getLoc d
       DModSig d -> getLoc d
+      DModParam d -> getLoc d
+
+instance HasLoc (ModParam name) where
+  getLoc mp = case mpName mp of
+                Just x -> getLoc x
+                Nothing -> getLoc (mpSignature mp)
+
+
+instance HasLoc (ModParamSig name) where
+  getLoc mpsig =
+    case mpsig of
+      NamedSig x -> getLoc x
+      InlineSig x -> getLoc x
+
 
 instance HasLoc (Signature name) where
   getLoc = getLoc . sigName
@@ -639,10 +672,14 @@ instance (Show name, PPName name) => PP (TopDecl name) where
       DModule d -> pp d
       DImport i -> pp (thing i)
       DModSig s -> pp s
+      DModParam s -> pp s
 
 instance (Show name, PPName name) => PP (Signature name) where
-  ppPrec _ sig =
-    vcat [ "signature" <+> pp (sigName sig) <+> "where"
+  ppPrec _ = ppSignature "signature"
+
+ppSignature :: (Show name, PPName name) => Doc -> Signature name -> Doc
+ppSignature kw sig =
+    vcat [ kw <+> pp (sigName sig) <+> "where"
          , nest 2 (vcat ds)
          ]
     where
@@ -653,6 +690,16 @@ instance (Show name, PPName name) => PP (Signature name) where
            xs  -> "type constraint" <+> parens (hsep (punctuate comma xs))
          ]
       ++ map pp (sigFunParams sig)
+
+
+instance (Show name, PPName name) => PP (ModParam name) where
+  ppPrec _ mp = undefined
+
+instance (Show name, PPName name) => PP (ModParamSig name) where
+  ppPrec _ sig =
+    case sig of
+      NamedSig s -> pp (thing s)
+      InlineSig s -> ppSignature "parameter" s
 
 instance (Show name, PPName name) => PP (PrimType name) where
   ppPrec _ pt =
