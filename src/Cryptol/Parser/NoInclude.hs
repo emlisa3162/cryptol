@@ -188,6 +188,7 @@ noIncTopDecl td = case td of
            pure [ DModule tl { tlValue = NestedModule m1 } ]
   DImport {} -> pure [td]
   DModSig {} -> pure [td]
+  DModParam {} -> pure [td]
 
 -- | Resolve the file referenced by a include into a list of top-level
 -- declarations.

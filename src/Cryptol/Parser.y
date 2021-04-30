@@ -258,13 +258,22 @@ vtop_decl               :: { [TopDecl PName] }
     module_def             {% ((:[]) . exportModule $1) `fmap` mkNested $3 }
 
   | mbDoc sig_def          { [mkSigDecl $1 $2]  }
-  | import                 { [DImport $1] }
+  | mod_param_decl         { [DModParam $1] }
+  | mbDoc import           { [DImport $2] }
+    -- we allow for documentation here to avoid conflicts with module paramaters
+    -- currently that odcumentation is just discarded
 
 sig_def ::                 { Signature PName }
   : 'signature' name 'where' 'v{' par_decls 'v}'
                            { mkSignature $2 $5 }
 
- 
+mod_param_decl ::          { ModParam PName }
+  : mbDoc
+   'import' 'signature'
+    name mbAs              { ModParam { mpSignature = $4
+                                      , mpAs        = fmap thing $5
+                                      , mpDoc       = $1 } }
+
 
 top_decl                :: { [TopDecl PName] }
   : decl                   { [Decl (TopLevel {tlExport = Public, tlValue = $1 })] }

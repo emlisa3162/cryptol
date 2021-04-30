@@ -60,6 +60,7 @@ module Cryptol.Parser.AST
   , ParameterFun(..)
   , NestedModule(..)
   , Signature(..)
+  , ModParam(..)
 
     -- * Interactive
   , ReplInput(..)
@@ -225,22 +226,16 @@ data Signature name = Signature
   , sigFunParams    :: [ParameterFun name]      -- ^ Value parameters
   } deriving (Eq,Show,Generic,NFData)
 
-{- | A module parameter declasration
+{- | A module parameter declaration
 A functor may have either 1 unnamed parameter or multiple named parameters
 For the time being, unnamed parameters introduce the names from the
 signature unqualified, while the named version always adds them qualified,
 although we may want to add more control here -}
 data ModParam name = ModParam
-  { mpName          :: Maybe (Located name) -- ^ Name of parameter
-  , mpSignature     :: ModParamSig name     -- ^ Signature for parameter
+  { mpSignature     :: Located name         -- ^ Signature for parameter
+  , mpAs            :: Maybe ModName        -- ^ QUalifier and param. name
   , mpDoc           :: Maybe (Located Text) -- ^ Optional documentation
   } deriving (Eq,Show,Generic,NFData)
-
--- | The signature to use for a module parmater
-data ModParamSig name =
-    NamedSig (Located name)        -- ^ Use a pre-declared signature
-  | InlineSig (Signature name)     -- ^ Declare this signature and use it
-    deriving (Eq,Show,Generic,NFData)
 
 
 -- | An import declaration.
@@ -568,17 +563,7 @@ instance HasLoc (TopDecl name) where
       DModParam d -> getLoc d
 
 instance HasLoc (ModParam name) where
-  getLoc mp = case mpName mp of
-                Just x -> getLoc x
-                Nothing -> getLoc (mpSignature mp)
-
-
-instance HasLoc (ModParamSig name) where
-  getLoc mpsig =
-    case mpsig of
-      NamedSig x -> getLoc x
-      InlineSig x -> getLoc x
-
+  getLoc mp = getLoc (mpSignature mp)
 
 instance HasLoc (Signature name) where
   getLoc = getLoc . sigName
@@ -693,13 +678,14 @@ ppSignature kw sig =
 
 
 instance (Show name, PPName name) => PP (ModParam name) where
-  ppPrec _ mp = undefined
-
-instance (Show name, PPName name) => PP (ModParamSig name) where
-  ppPrec _ sig =
-    case sig of
-      NamedSig s -> pp (thing s)
-      InlineSig s -> ppSignature "parameter" s
+  ppPrec _ mp = mbDoc $$ "import signature" <+> pp (mpSignature mp) <+> mbAs
+    where
+    mbDoc = case mpDoc mp of
+              Nothing -> empty
+              Just d  -> pp d
+    mbAs  = case mpAs mp of
+              Nothing -> empty
+              Just d  -> "as" <+> pp d
 
 instance (Show name, PPName name) => PP (PrimType name) where
   ppPrec _ pt =
@@ -1092,6 +1078,7 @@ instance NoPos (TopDecl name) where
       DModule d -> DModule (noPos d)
       DImport d -> DImport (noPos d)
       DModSig d -> DModSig (noPos d)
+      DModParam d -> DModParam (noPos d)
 
 instance NoPos (Signature name) where
   noPos sig = Signature { sigName = noPos (sigName sig)
@@ -1099,6 +1086,12 @@ instance NoPos (Signature name) where
                         , sigConstraints = map noPos (sigConstraints sig)
                         , sigFunParams = map noPos (sigFunParams sig)
                         }
+
+instance NoPos (ModParam name) where
+  noPos mp = ModParam { mpSignature = noPos (mpSignature mp)
+                      , mpAs        = mpAs mp
+                      , mpDoc       = noPos <$> mpDoc mp
+                      }
 
 instance NoPos (PrimType name) where
   noPos x = x

@@ -510,17 +510,19 @@ mkParType mbDoc n k =
 changeExport :: ExportType -> [TopDecl PName] -> [TopDecl PName]
 changeExport e = map change
   where
-  change (Decl d)      = Decl      d { tlExport = e }
-  change (DPrimType t) = DPrimType t { tlExport = e }
-  change (TDNewtype n) = TDNewtype n { tlExport = e }
-  change (DModule m)   = DModule   m { tlExport = e }
-  change (DModSig s)   = DModSig   s { tlExport = e }
-  change td@Include{}  = td
-  change td@DImport{}  = td
-  change (DParameterType {}) = panic "changeExport" ["private type parameter?"]
-  change (DParameterFun {})  = panic "changeExport" ["private value parameter?"]
-  change (DParameterConstraint {}) =
-    panic "changeExport" ["private type constraint parameter?"]
+  change decl =
+    case decl of
+      Decl d                  -> Decl      d { tlExport = e }
+      DPrimType t             -> DPrimType t { tlExport = e }
+      TDNewtype n             -> TDNewtype n { tlExport = e }
+      DModule m               -> DModule   m { tlExport = e }
+      DModSig s               -> DModSig   s { tlExport = e }
+      DModParam {}            -> decl
+      Include{}               -> decl
+      DImport{}               -> decl
+      DParameterType {}       -> decl
+      DParameterFun {}        -> decl
+      DParameterConstraint {} -> decl
 
 mkTypeInst :: Named (Type PName) -> TypeInst PName
 mkTypeInst x | nullIdent (thing (name x)) = PosInst (value x)
