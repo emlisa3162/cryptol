@@ -147,18 +147,18 @@ class Rename f where
 
 -- | Returns:
 --
---    * Interfaces for imported things,
---    * Things defines in the module
+--    * Things defined in the module
 --    * Renamed module
 renameModule' ::
-  NestedMods -> NamingEnv -> ModPath -> ModuleG mname PName ->
-  RenameM (NamingEnv, ModuleG mname Name)
+  NestedMods -> NamingEnv -> ModPath ->
+  ModuleG mname PName -> RenameM (NamingEnv, ModuleG mname Name)
 renameModule' thisNested env mpath m =
   setCurMod mpath
   do (moreNested,imps) <- mconcat <$> mapM doImport (mImports m)
      let allNested = Map.union moreNested thisNested
          openDs    = map thing (mSubmoduleImports m)
          allImps   = openLoop allNested env openDs imps
+         -- XXX: add parameters if any
 
      (inScope,decls') <-
         shadowNames' CheckNone allImps $
@@ -214,10 +214,12 @@ checkSameModule xs =
   ms = [ (x,p) | NamedThing x <- xs, Declared p _ <- [ nameInfo x ] ]
 
 
+-- This assumes imports have already been processed
 renameTopDecls' ::
   (NestedMods,ModPath) -> [TopDecl PName] -> RenameM [TopDecl Name]
 renameTopDecls' info ds =
-  do (ds1,deps) <- depGroup (traverse (renameWithMods info) ds)
+  do -- rename and compute what names we depend on
+     (ds1,deps) <- depGroup (traverse (renameWithMods info) ds)
 
 
      let (noNameDs,nameDs) = partitionEithers (map topDeclName ds1)
@@ -249,6 +251,10 @@ renameTopDecls' info ds =
      rds <- mapM fromSCC ordered
      pure (concat (noNameDs:rds))
   where
+
+  -- This indicates if a declaration might depend on the constraints in scope.
+  -- Since uses of contraints are not implicitly named, value declarations
+  -- are assumed to potentially use the constraints.
   usesCtrs td =
     case td of
       Decl tl                 -> isValDecl (tlValue tl)
@@ -265,15 +271,19 @@ renameTopDecls' info ds =
       DModule tl              -> any usesCtrs (mDecls m)
         where NestedModule m = tlValue tl
       DImport {}              -> False
+      DModSig {}              -> False    -- no definitions here
+      DModParam {}            -> False    -- no definitions here
       Include {}              -> bad "Include"
 
   isValDecl d =
     case d of
       DLocated d' _ -> isValDecl d'
       DBind {}      -> True
+      DRec {}       -> True
+
       DType {}      -> False
       DProp {}      -> False
-      DRec {}       -> True
+
       DSignature {} -> bad "DSignature"
       DFixity {}    -> bad "DFixity"
       DPragma {}    -> bad "DPragma"
@@ -323,7 +333,6 @@ topDeclName topDecl =
 
 
 -- | Returns:
---  * The public interface of the imported module
 --  * Infromation about nested modules in this module
 --  * New names introduced through this import
 doImport :: Located Import -> RenameM (NestedMods, NamingEnv)
@@ -337,18 +346,20 @@ doImport li =
 
 
 --------------------------------------------------------------------------------
--- Compute names coming through `open` statements.
+-- Compute names coming through `import submodule` statements.
+-- The issue is that in `import submodule X` we need to resolve what `X`
+-- referes to before we know what it will import.
 
 data OpenLoopState = OpenLoopState
   { unresolvedOpen  :: [ImportG PName]
-  , scopeImports    :: NamingEnv    -- names from open/impot
-  , scopeDefs       :: NamingEnv    -- names defined in this module
-  , scopingRel      :: NamingEnv    -- defs + imports with shadowing
-                                    -- (just a cache)
+  , scopeImports    :: NamingEnv   -- names from open/impot
+  , scopeDefs       :: NamingEnv   -- names defined in this module
+  , scopingRel      :: NamingEnv   -- defs + imports with shadowing
+                                   -- (just a cache of `scopeImports+scopeDefs`)
   , openLoopChange  :: Bool
   }
 
--- | Processing of a single @open@ declaration
+-- | Processing of a single @import submodule@ declaration
 processOpen :: NestedMods -> OpenLoopState -> ImportG PName -> OpenLoopState
 processOpen modEnvs s o =
   case lookupNS NSModule (iModule o) (scopingRel s) of
@@ -374,7 +385,7 @@ processOpen modEnvs s o =
          *all* options, but that might lead to spurious ambiguity errors.
     -}
 
-{- | Complete the set of import using @open@ declarations.
+{- | Complete the set of import using @import submodule@ declarations.
 This should terminate because on each iteration either @unresolvedOpen@
 decreases or @openLoopChange@ remians @False@. We don't report errors
 here, as they will be reported during renaming anyway. -}
@@ -434,6 +445,14 @@ instance Rename (WithMods TopDecl) where
         where
         renI i = do m <- rename (iModule i)
                     pure i { iModule = m }
+
+      -- DModParam mp -> undefined
+      -- DModSig sig -> 
+
+{-
+instance Rename (WithMods Signature) where
+  rename (WithMods info sig) 
+-}
 
 instance Rename ImpName where
   rename i =

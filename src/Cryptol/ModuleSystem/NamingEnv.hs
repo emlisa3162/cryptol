@@ -240,7 +240,8 @@ collectNestedModulesDs mpath env ds =
                                 -- caught during actual renaming.
                      _   -> panic "collectedNestedModulesDs"
                              [ "Missing definition for " ++ show pname ]
-       newEnv <- lift (runBuild (moduleDefs (Nested mpath (nameIdent name)) nested))
+       newEnv <- lift $ runBuild $
+                 moduleDefs (Nested mpath (nameIdent name)) nested
        sets_ (Map.insert name newEnv)
        let newMPath = Nested mpath (nameIdent name)
        collectNestedModulesDs newMPath newEnv (mDecls nested)
@@ -407,12 +408,22 @@ instance BindsNames (InModule (TopDecl PName)) where
       DImport {}       -> mempty -- see 'openLoop' in the renamer
       DModule m        -> namingEnv (InModule ns (tlValue m))
 
+      DModSig s        -> namingEnv (InModule ns (tlValue s))
+      DModParam {}     -> mempty -- handled in the renamer as we need to resolve
+                                 -- the signature name first
+
 
 instance BindsNames (InModule (NestedModule PName)) where
   namingEnv (InModule ~(Just m) (NestedModule mdef)) = BuildNamingEnv $
     do let pnmame = mName mdef
        nm   <- newTop NSModule m (thing pnmame) Nothing (srcRange pnmame)
        pure (singletonNS NSModule (thing pnmame) nm)
+
+instance BindsNames (InModule (Signature PName)) where
+  namingEnv (InModule ~(Just m) sig) = BuildNamingEnv
+    do let pname = sigName sig
+       nm <- newTop NSModule m (thing pname) Nothing (srcRange pname)
+       pure (singletonNS NSModule (thing pname) nm)
 
 instance BindsNames (InModule (PrimType PName)) where
   namingEnv (InModule ~(Just m) PrimType { .. }) =
