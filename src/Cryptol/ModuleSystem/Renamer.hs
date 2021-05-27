@@ -38,7 +38,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Graph(SCC(..))
 import Data.Graph.SCC(stronglyConnComp)
-import           MonadLib hiding (mapM, mapM_)
+import MonadLib hiding (mapM, mapM_)
 
 
 import Cryptol.ModuleSystem.Name
@@ -319,6 +319,8 @@ topDeclName topDecl =
     DModule d               -> hasName (thing (mName m))
       where NestedModule m = tlValue d
 
+    DModSig d               -> hasName (thing (sigName (tlValue d)))
+
     DParameterConstraint ds ->
       case ds of
         []  -> noName
@@ -449,10 +451,18 @@ instance Rename (WithMods TopDecl) where
       -- DModParam mp -> undefined
       -- DModSig sig -> 
 
-{-
 instance Rename (WithMods Signature) where
-  rename (WithMods info sig) 
--}
+  rename (WithMods info sig) =
+    do let pname = thing (sigName sig)
+       nm <- resolveName NameBind NSModule pname
+       -- find `nm` in info, add the names to scope and resolve the sig body.
+       -- note that we need to keep the association between parser names
+       -- and renamed named, as when checking signatures we match names
+       -- based on the *parsed* names (e.g., we check if something called
+       -- "x" was defined, for parameter "x")
+       undefined "XXX"
+
+
 
 instance Rename ImpName where
   rename i =

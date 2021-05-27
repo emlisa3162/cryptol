@@ -112,6 +112,7 @@ data IfaceDecls = IfaceDecls
   , ifAbstractTypes :: Map.Map Name IfaceAbstractType
   , ifDecls         :: Map.Map Name IfaceDecl
   , ifModules       :: !(Map.Map Name (IfaceG Name))
+  , ifSignatures    :: !(Map.Map Name IfaceParams)
   } deriving (Show, Generic, NFData)
 
 filterIfaceDecls :: (Name -> Bool) -> IfaceDecls -> IfaceDecls
@@ -121,6 +122,7 @@ filterIfaceDecls p ifs = IfaceDecls
   , ifAbstractTypes = filterMap (ifAbstractTypes ifs)
   , ifDecls         = filterMap (ifDecls ifs)
   , ifModules       = filterMap (ifModules ifs)
+  , ifSignatures    = filterMap (ifSignatures ifs)
   }
   where
   filterMap :: Map.Map Name a -> Map.Map Name a
@@ -142,10 +144,12 @@ instance Semigroup IfaceDecls where
     , ifAbstractTypes = Map.union (ifAbstractTypes l) (ifAbstractTypes r)
     , ifDecls    = Map.union (ifDecls l)    (ifDecls r)
     , ifModules  = Map.union (ifModules l)  (ifModules r)
+    , ifSignatures = ifSignatures l <> ifSignatures r
     }
 
 instance Monoid IfaceDecls where
   mempty      = IfaceDecls Map.empty Map.empty Map.empty Map.empty Map.empty
+                           mempty
   mappend l r = l <> r
   mconcat ds  = IfaceDecls
     { ifTySyns   = Map.unions (map ifTySyns   ds)
@@ -153,6 +157,7 @@ instance Monoid IfaceDecls where
     , ifAbstractTypes = Map.unions (map ifAbstractTypes ds)
     , ifDecls    = Map.unions (map ifDecls    ds)
     , ifModules  = Map.unions (map ifModules ds)
+    , ifSignatures = Map.unions (map ifSignatures ds)
     }
 
 type IfaceTySyn = TySyn

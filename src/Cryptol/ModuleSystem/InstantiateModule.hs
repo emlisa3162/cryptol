@@ -86,6 +86,7 @@ instantiateModule func newName tpMap vpMap
 
                  , mSubModules        = mempty
                  , mFunctors          = mempty
+                 , mSignatures        = mempty -- XXX
                  } )
 
   where
