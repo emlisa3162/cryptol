@@ -127,12 +127,17 @@ newtype Program name = Program [TopDecl name]
 -- | A parsed module.
 data ModuleG mname name = Module
   { mName     :: Located mname              -- ^ Name of the module
-  , mInstance :: !(Maybe (Located ModName)) -- ^ Functor to instantiate
-                                            -- (if this is a functor instnaces)
-  -- , mImports  :: [Located Import]           -- ^ Imports for the module
-  , mDecls    :: [TopDecl name]             -- ^ Declartions for the module
+  , mInstance :: !(Maybe (Located ModName))
+    -- ^ Functor to instantiate (if this is a functor instnaces)
+    -- This is OLD module system functor.
+
+  , mDecls    :: [TopDecl name]
+    -- ^ Declartions for the module.  This includes module system related
+    -- stuff such as imports.
   } deriving (Show, Generic, NFData)
 
+
+-- | Imports of top-level (i.e. "file" based) modules.
 mImports :: ModuleG mname name -> [ Located Import ]
 mImports m =
   [ li { thing = i { iModule = n } }
@@ -141,6 +146,8 @@ mImports m =
   , ImpTop n  <- [iModule i]
   ]
 
+-- | Imports of nested modules---these may require name resolution to
+-- detrmine what module we are talking about.
 mSubmoduleImports :: ModuleG mname name -> [ Located (ImportG name) ]
 mSubmoduleImports m =
   [ li { thing = i { iModule = n } }
@@ -150,10 +157,10 @@ mSubmoduleImports m =
   ]
 
 
-
+-- | A top-level module
 type Module = ModuleG ModName
 
-
+-- | A nested module.
 newtype NestedModule name = NestedModule (ModuleG name name)
   deriving (Show,Generic,NFData)
 
@@ -166,7 +173,8 @@ modRange m = rCombs $ catMaybes
     , Just (Range { from = start, to = start, source = "" })
     ]
 
-
+-- | A declaration that may only appear at the top level of a module.
+-- The module may be nested, however.
 data TopDecl name =
     Decl (TopLevel (Decl name))
   | DPrimType (TopLevel (PrimType name))
@@ -182,11 +190,14 @@ data TopDecl name =
   | DModParam (ModParam name)                   -- ^ A functor parameter
     deriving (Show, Generic, NFData)
 
+-- | The name of an imported module
 data ImpName name =
-    ImpTop    ModName
-  | ImpNested name
+    ImpTop    ModName           -- ^ A top-level module
+  | ImpNested name              -- ^ The module in scope with the given name
     deriving (Show, Generic, NFData)
 
+-- | A simple declaration.  Generally these are things that can appear
+-- both at the top-level of a module and in `where` clauses.
 data Decl name = DSignature [Located name] (Schema name)
                | DFixity !Fixity [Located name]
                | DPragma [Located name] Pragma
@@ -200,7 +211,9 @@ data Decl name = DSignature [Located name] (Schema name)
                  deriving (Eq, Show, Generic, NFData, Functor)
 
 
--- | A type parameter
+-- | A type parameter for a module.
+-- This is used in the OLD module system, as well as in signatures of
+-- the NEW module system.
 data ParameterType name = ParameterType
   { ptName    :: Located name     -- ^ name of type parameter
   , ptKind    :: Kind             -- ^ kind of parameter
@@ -209,7 +222,9 @@ data ParameterType name = ParameterType
   , ptNumber  :: !Int             -- ^ number of the parameter
   } deriving (Eq,Show,Generic,NFData)
 
--- | A value parameter
+-- | A value parameter for a module.
+-- This is used in the OLD module system, as well as in signatures of
+-- the NEW module system.
 data ParameterFun name = ParameterFun
   { pfName   :: Located name      -- ^ name of value parameter
   , pfSchema :: Schema name       -- ^ schema for parameter
@@ -219,6 +234,7 @@ data ParameterFun name = ParameterFun
 
 
 -- | Module signatures (aka types of functor arguments)
+-- This is part of the NEW module system
 data Signature name = Signature
   { sigName         :: Located name             -- ^ Name of the signature
   , sigTypeParams   :: [ParameterType name]     -- ^ Type parameters
@@ -233,7 +249,7 @@ signature unqualified, while the named version always adds them qualified,
 although we may want to add more control here -}
 data ModParam name = ModParam
   { mpSignature     :: Located name         -- ^ Signature for parameter
-  , mpAs            :: Maybe ModName        -- ^ QUalifier and param. name
+  , mpAs            :: Maybe ModName        -- ^ Qualifier and param. name
   , mpDoc           :: Maybe (Located Text) -- ^ Optional documentation
   } deriving (Eq,Show,Generic,NFData)
 
