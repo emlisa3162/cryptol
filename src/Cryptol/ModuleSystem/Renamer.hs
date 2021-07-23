@@ -255,6 +255,9 @@ renameTopDecls' info ds =
   -- This indicates if a declaration might depend on the constraints in scope.
   -- Since uses of contraints are not implicitly named, value declarations
   -- are assumed to potentially use the constraints.
+
+  -- XXX: types may also need constraints to ensure they are well formed:
+  -- for example, `Z n` requires `(fin n, n >= 1)`.
   usesCtrs td =
     case td of
       Decl tl                 -> isValDecl (tlValue tl)
