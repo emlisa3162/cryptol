@@ -1225,9 +1225,9 @@ helpCmd cmd
                rnEnv  = M.mctxNames  fe
                disp   = M.mctxNameDisp fe
 
-               vNames = M.lookupValNames  qname rnEnv
-               tNames = M.lookupTypeNames qname rnEnv
-               mNames = M.lookupNS M.NSModule qname rnEnv
+               vNames = M.lookupListNS M.NSValue  qname rnEnv
+               tNames = M.lookupListNS M.NSType   qname rnEnv
+               mNames = M.lookupListNS M.NSModule qname rnEnv
 
            let helps = map (showTypeHelp params env disp) tNames ++
                        map (showValHelp params env disp qname) vNames ++
@@ -1616,7 +1616,7 @@ bindItVariable ty expr = do
                     }
   liftModuleCmd (M.evalDecls [T.NonRecursive decl])
   denv <- getDynEnv
-  let nenv' = M.singletonE (P.UnQual itIdent) freshIt
+  let nenv' = M.singletonNS M.NSValue (P.UnQual itIdent) freshIt
                            `M.shadowing` M.deNames denv
   setDynEnv $ denv { M.deNames = nenv' }
   return freshIt

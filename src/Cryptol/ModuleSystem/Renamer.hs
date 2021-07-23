@@ -361,12 +361,21 @@ data OpenLoopState = OpenLoopState
   , openLoopChange  :: Bool
   }
 
--- | Processing of a single @import submodule@ declaration
+{- | Processing of a single @import submodule@ declaration
+Notes:
+  * ambiguity will be reported later when we do the renaming
+  * assumes scoping only grows, which should be true
+  * we are not adding the names from *either* of the imports
+    so this may give rise to undefined names, so we may want to
+    suppress reporing undefined names if there ambiguities for
+    module names.  Alternatively we could add the defitions from
+    *all* options, but that might lead to spurious ambiguity errors.
+-}
 processOpen :: NestedMods -> OpenLoopState -> ImportG PName -> OpenLoopState
 processOpen modEnvs s o =
   case lookupNS NSModule (iModule o) (scopingRel s) of
-    []  -> s { unresolvedOpen = o : unresolvedOpen s }
-    [n] ->
+    Nothing -> s { unresolvedOpen = o : unresolvedOpen s }
+    Just (One n) ->
       case Map.lookup n modEnvs of
         Nothing  -> panic "openLoop" [ "Missing defintion for module", show n ]
         Just def ->
@@ -376,16 +385,9 @@ processOpen modEnvs s o =
                , scopingRel     = scopeDefs s `shadowing` newImps
                , openLoopChange = True
                }
-    _ -> s
-    {- Notes:
-       * ambiguity will be reported later when we do the renaming
-       * assumes scoping only grows, which should be true
-       * we are not adding the names from *either* of the imports
-         so this may give rise to undefined names, so we may want to
-         suppress reporing undefined names if there ambiguities for
-         module names.  Alternatively we could add the defitions from
-         *all* options, but that might lead to spurious ambiguity errors.
-    -}
+    Just (Ambig _) -> s
+
+
 
 {- | Complete the set of import using @import submodule@ declarations.
 This should terminate because on each iteration either @unresolvedOpen@
@@ -564,18 +566,20 @@ resolveNameMaybe nt expected qn =
                  NSType -> recordUse
                  _      -> const (pure ())
      case lkpIn expected of
-       Just [n]  ->
-          do case nt of
-               NameBind -> pure ()
-               NameUse  -> addDep n
-             use n    -- for warning
-             return (Just n)
-       Just []   -> panic "Renamer" ["Invalid expression renaming environment"]
-       Just syms ->
-         do mapM_ use syms    -- mark as used to avoid unused warnings
-            n <- located qn
-            record (MultipleSyms n syms)
-            return (Just (head syms))
+       Just xs ->
+         case xs of
+          One n ->
+            do case nt of
+                 NameBind -> pure ()
+                 NameUse  -> addDep n
+               use n    -- for warning
+               return (Just n)
+          Ambig symSet ->
+            do let syms = Set.toList symSet
+               mapM_ use syms    -- mark as used to avoid unused warnings
+               n <- located qn
+               record (MultipleSyms n syms)
+               return (Just (head syms))
 
        Nothing -> pure Nothing
 
@@ -948,7 +952,7 @@ patternEnv  = go
   go (PVar Located { .. }) =
     do n <- liftSupply (mkParameter NSValue (getIdent thing) srcRange)
        -- XXX: for deps, we should record a use
-       return (singletonE thing n)
+       return (singletonNS NSValue thing n)
 
   go PWild            = return mempty
   go (PTuple ps)      = bindVars ps
@@ -987,7 +991,7 @@ patternEnv  = go
            | null ps ->
              do loc <- curLoc
                 n   <- liftSupply (mkParameter NSType (getIdent pn) loc)
-                return (singletonT pn n)
+                return (singletonNS NSType pn n)
 
            -- This references a type synonym that's not in scope. Record an
            -- error and continue with a made up name.
@@ -995,7 +999,7 @@ patternEnv  = go
              do loc <- curLoc
                 record (UnboundName NSType (Located loc pn))
                 n   <- liftSupply (mkParameter NSType (getIdent pn) loc)
-                return (singletonT pn n)
+                return (singletonNS NSType pn n)
 
   typeEnv (TRecord fs)      = bindTypes (map snd (recordElements fs))
   typeEnv (TTyApp fs)       = bindTypes (map value fs)
