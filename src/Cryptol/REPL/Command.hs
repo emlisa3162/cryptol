@@ -1228,10 +1228,12 @@ helpCmd cmd
                vNames = M.lookupListNS M.NSValue  qname rnEnv
                tNames = M.lookupListNS M.NSType   qname rnEnv
                mNames = M.lookupListNS M.NSModule qname rnEnv
+               sNames = M.lookupListNS M.NSSignature qname rnEnv
 
            let helps = map (showTypeHelp params env disp) tNames ++
                        map (showValHelp params env disp qname) vNames ++
-                       map (showModHelp env disp) mNames
+                       map (showModHelp env disp) mNames ++
+                       map (showSigHelp env disp) sNames
 
                separ = rPutStrLn "            ---------"
            sequence_ (intersperse separ helps)
@@ -1252,6 +1254,10 @@ helpCmd cmd
   showModHelp _env disp x =
     rPrint $ runDoc disp $ vcat [ "`" <> pp x <> "` is a module." ]
     -- XXX: show doc. if any
+
+  showSigHelp _env disp x =
+    rPrint $ runDoc disp $ vcat [ "`" <> pp x <> "` is a signature." ]
+    -- XXX: show doc. if any, and maybe other stuff
 
   showTypeHelp params env nameEnv name =
     fromMaybe (noInfo nameEnv name) $

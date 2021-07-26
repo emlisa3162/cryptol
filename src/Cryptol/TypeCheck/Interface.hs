@@ -71,7 +71,7 @@ genIface m = Iface
       $ mSubModules m
 
   (sPub,sPriv) =
-      Map.partitionWithKey (\ qn _ -> isExported NSModule qn (mExports m))
+      Map.partitionWithKey (\ qn _ -> isExported NSSignature qn (mExports m))
       $ mSignatures m
 
 

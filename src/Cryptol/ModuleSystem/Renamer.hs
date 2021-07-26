@@ -85,7 +85,7 @@ renameTopDecls m ds0 =
   do let ds = snd (addImplicitNestedImports ds0)
      let mpath = TopModule m
      env    <- liftSupply (defsOf (map (InModule (Just mpath)) ds))
-     nested <- liftSupply (collectNestedModulesDecls env m ds)
+     nested <- liftSupply (collectNestedDecls env m ds)
 
      setNestedModule (nestedModuleNames nested)
        do ds1 <- shadowNames' CheckOverlap env
@@ -133,8 +133,8 @@ addImplicitNestedImports decls = (concat exportedMods, concat newDecls ++ other)
       _          -> (ms, d : ds)
 
 
-nestedModuleNames :: NestedMods -> Map ModPath Name
-nestedModuleNames mp = Map.fromList (map entry (Map.keys mp))
+nestedModuleNames :: OwnedEntities -> Map ModPath Name
+nestedModuleNames own = Map.fromList (map entry (Map.keys (ownSubmodules own)))
   where
   entry n = case nameInfo n of
               Declared p _ -> (Nested p (nameIdent n),n)
@@ -150,12 +150,12 @@ class Rename f where
 --    * Things defined in the module
 --    * Renamed module
 renameModule' ::
-  NestedMods -> NamingEnv -> ModPath ->
+  OwnedEntities -> NamingEnv -> ModPath ->
   ModuleG mname PName -> RenameM (NamingEnv, ModuleG mname Name)
 renameModule' thisNested env mpath m =
   setCurMod mpath
   do (moreNested,imps) <- mconcat <$> mapM doImport (mImports m)
-     let allNested = Map.union moreNested thisNested
+     let allNested = moreNested <> thisNested
          openDs    = map thing (mSubmoduleImports m)
          allImps   = openLoop allNested env openDs imps
          -- XXX: add parameters if any
@@ -216,7 +216,7 @@ checkSameModule xs =
 
 -- This assumes imports have already been processed
 renameTopDecls' ::
-  (NestedMods,ModPath) -> [TopDecl PName] -> RenameM [TopDecl Name]
+  (OwnedEntities,ModPath) -> [TopDecl PName] -> RenameM [TopDecl Name]
 renameTopDecls' info ds =
   do -- rename and compute what names we depend on
      (ds1,deps) <- depGroup (traverse (renameWithMods info) ds)
@@ -340,13 +340,15 @@ topDeclName topDecl =
 -- | Returns:
 --  * Infromation about nested modules in this module
 --  * New names introduced through this import
-doImport :: Located Import -> RenameM (NestedMods, NamingEnv)
+doImport :: Located Import -> RenameM (OwnedEntities, NamingEnv)
 doImport li =
   do let i = thing li
      decls <- lookupImport i
-     let declsOf = unqualifiedEnv . ifPublic
-         nested  = declsOf <$> ifModules decls
-     pure (nested, interpImportIface i decls)
+     let own = OwnedEntities
+           { ownSubmodules = unqualifiedEnv . ifPublic <$> ifModules decls
+           , ownSignatures = modParamsNamingEnv        <$> ifSignatures decls
+           }
+     pure (own, interpImportIface i decls)
 
 
 
@@ -374,12 +376,12 @@ Notes:
     module names.  Alternatively we could add the defitions from
     *all* options, but that might lead to spurious ambiguity errors.
 -}
-processOpen :: NestedMods -> OpenLoopState -> ImportG PName -> OpenLoopState
+processOpen :: OwnedEntities -> OpenLoopState -> ImportG PName -> OpenLoopState
 processOpen modEnvs s o =
   case lookupNS NSModule (iModule o) (scopingRel s) of
     Nothing -> s { unresolvedOpen = o : unresolvedOpen s }
     Just (One n) ->
-      case Map.lookup n modEnvs of
+      case Map.lookup n (ownSubmodules modEnvs) of
         Nothing  -> panic "openLoop" [ "Missing defintion for module", show n ]
         Just def ->
           let new = interpImportEnv o def
@@ -397,7 +399,7 @@ This should terminate because on each iteration either @unresolvedOpen@
 decreases or @openLoopChange@ remians @False@. We don't report errors
 here, as they will be reported during renaming anyway. -}
 openLoop ::
-  NestedMods      {- ^ Definitions of all known nested modules  -} ->
+  OwnedEntities   {- ^ Definitions of all known nested things -} ->
   NamingEnv       {- ^ Definitions of the module (these shadow) -} ->
   [ImportG PName] {- ^ Open declarations                        -} ->
   NamingEnv       {- ^ Imported declarations                    -} ->
@@ -422,13 +424,13 @@ openLoop modEnvs defs os imps =
 --------------------------------------------------------------------------------
 
 
-data WithMods f n = WithMods (NestedMods,ModPath) (f n)
+data WithMods f n = WithMods (OwnedEntities,ModPath) (f n)
 
 forgetMods :: WithMods f n -> f n
 forgetMods (WithMods _ td) = td
 
 renameWithMods ::
-  Rename (WithMods f) => (NestedMods,ModPath) -> f PName -> RenameM (f Name)
+  Rename (WithMods f) => (OwnedEntities,ModPath) -> f PName -> RenameM (f Name)
 renameWithMods info m = forgetMods <$> rename (WithMods info m)
 
 
@@ -454,18 +456,29 @@ instance Rename (WithMods TopDecl) where
                     pure i { iModule = m }
 
       -- DModParam mp -> undefined
-      -- DModSig sig -> 
+      DModSig sig -> DModSig <$> traverse (renameSignature (fst info)) sig
 
-instance Rename (WithMods Signature) where
-  rename (WithMods info sig) =
-    do let pname = thing (sigName sig)
-       nm <- resolveName NameBind NSModule pname
-       -- find `nm` in info, add the names to scope and resolve the sig body.
-       -- note that we need to keep the association between parser names
-       -- and renamed named, as when checking signatures we match names
-       -- based on the *parsed* names (e.g., we check if something called
-       -- "x" was defined, for parameter "x")
-       undefined "XXX"
+renameSignature :: OwnedEntities -> Signature PName -> RenameM (Signature Name)
+renameSignature info sig =
+  do let pname = thing (sigName sig)
+     nm <- resolveName NameBind NSSignature pname
+     case Map.lookup nm (ownSignatures info) of
+       Just env ->
+         shadowNames' CheckOverlap env
+            do tps <- traverse rename (sigTypeParams sig)
+               cts <- traverse (traverse rename) (sigConstraints sig)
+               fun <- traverse rename (sigFunParams sig)
+               pure Signature
+                      { sigName = (sigName sig) { thing = nm }
+                      , sigTypeParams = tps
+                      , sigConstraints = cts
+                      , sigFunParams = fun
+                      }
+
+       Nothing -> panic "renameSignature"
+                    [ "Missing naming environment for signature"
+                    , show nm
+                    ]
 
 
 
@@ -483,7 +496,7 @@ instance Rename (WithMods NestedModule) where
            newMPath       = Nested mpath (getIdent nm)
        n   <- resolveName NameBind NSModule nm
        depsOf (NamedThing n)
-         do let env = case Map.lookup n (fst info) of
+         do let env = case Map.lookup n (ownSubmodules (fst info)) of
                         Just defs -> defs
                         Nothing -> panic "rename"
                            [ "Missing environment for nested module", show n ]

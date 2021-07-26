@@ -35,6 +35,7 @@ import Prelude.Compat
 
 import Cryptol.Utils.PP
 import Cryptol.Utils.Panic (panic)
+import Cryptol.Utils.Ident(allNamespaces)
 import Cryptol.Parser.AST
 import Cryptol.Parser.Name(isGeneratedName)
 import Cryptol.Parser.Position
@@ -164,7 +165,7 @@ toNameDisp env = NameDisp (`Map.lookup` names)
   where
   names = Map.fromList
             [ (og, qn)
-              | ns            <- [ NSValue, NSType, NSModule ]
+              | ns            <- allNamespaces
               , (pn,xs)       <- Map.toList (namespaceMap ns env)
               , x             <- namesToList xs
               , og            <- maybeToList (asOrigName x)
@@ -233,48 +234,89 @@ defsOf = buildNamingEnv . namingEnv
 
 
 --------------------------------------------------------------------------------
--- Collect definitions of nested modules
+{- Collect definitions of entities that may contains other entities.
+For example, submodules and signatures, wen treated as declarations
+only introduce a single name (e.g., the name of the submodule or signature)
+but when used can introduce additional names (e.g., in an import or
+a submodule declaration).  The code in the following section computes the
+names that are "owned" by the all the entities, when "used".
+-}
 
-type NestedMods = Map Name NamingEnv
-type CollectM   = StateT NestedMods (SupplyT Id)
+
+data OwnedEntities = OwnedEntities
+  { ownSubmodules :: Map Name NamingEnv
+  , ownSignatures :: Map Name NamingEnv
+  }
+
+instance Semigroup OwnedEntities where
+  x <> y = OwnedEntities { ownSubmodules = ownSubmodules x <> ownSubmodules y
+                         , ownSignatures = ownSignatures x <> ownSignatures y
+                         }
+
+instance Monoid OwnedEntities where
+  mempty = OwnedEntities { ownSubmodules = mempty
+                         , ownSignatures = mempty
+                         }
+
+type CollectM   = StateT OwnedEntities (SupplyT Id)
 
 collectNestedModules ::
-  NamingEnv -> Module PName -> Supply -> (NestedMods, Supply)
+  NamingEnv -> Module PName -> Supply -> (OwnedEntities, Supply)
 collectNestedModules env m =
-  collectNestedModulesDecls env (thing (mName m)) (mDecls m)
+  collectNestedDecls env (thing (mName m)) (mDecls m)
 
-collectNestedModulesDecls ::
-  NamingEnv -> ModName -> [TopDecl PName] -> Supply -> (NestedMods, Supply)
-collectNestedModulesDecls env m ds sup = (mp,newS)
+collectNestedDecls ::
+  NamingEnv -> ModName -> [TopDecl PName] -> Supply -> (OwnedEntities, Supply)
+collectNestedDecls env m ds sup = (mp,newS)
   where
-  s0            = Map.empty
+  s0            = mempty
   mpath         = TopModule m
   ((_,mp),newS) = runId $ runSupplyT sup $ runStateT s0 $
-                  collectNestedModulesDs mpath env ds
+                  collectNestedDeclsM mpath env ds
 
-collectNestedModulesDs :: ModPath -> NamingEnv -> [TopDecl PName] -> CollectM ()
-collectNestedModulesDs mpath env ds =
-  forM_ [ tlValue nm | DModule nm <- ds ] \(NestedModule nested) ->
-    do let pname = thing (mName nested)
-           name  = case lookupNS NSModule pname env of
-                     Just ns -> anyOne ns
-                     Nothing -> panic "collectedNestedModulesDs"
-                                 [ "Missing definition for " ++ show pname ]
-           -- if a name is ambiguous we may get
-           -- multiple answers, but we just pick one.
-           -- This should be OK, as the error should be
-           -- caught during actual renaming.
 
-       newEnv <- lift $ runBuild $
-                 moduleDefs (Nested mpath (nameIdent name)) nested
-       sets_ (Map.insert name newEnv)
-       let newMPath = Nested mpath (nameIdent name)
-       collectNestedModulesDs newMPath newEnv (mDecls nested)
+
+collectNestedDeclsM :: ModPath -> NamingEnv -> [TopDecl PName] -> CollectM ()
+collectNestedDeclsM mpath env ds =
+
+  do forM_ [ tlValue s | DModSig s <- ds ] \s ->
+        do let pname = thing (sigName s)
+               name  = case lookupNS NSSignature pname env of
+                        Just ns -> anyOne ns
+                        Nothing -> panic "collectNestedDeclsM"
+                                    [ "Missing definition for " ++ show pname ]
+                        -- See comment below.
+
+           newEnv <- lift $ runBuild $
+                    signatureDefs (Nested mpath (nameIdent name)) s
+           sets_ \o -> o { ownSignatures = Map.insert name newEnv
+                                                        (ownSignatures o)}
+ 
+
+     forM_ [ tlValue nm | DModule nm <- ds ] \(NestedModule nested) ->
+       do let pname = thing (mName nested)
+              name  = case lookupNS NSModule pname env of
+                        Just ns -> anyOne ns
+                        Nothing -> panic "collectNestedDeclsM"
+                                    [ "Missing definition for " ++ show pname ]
+              -- if a name is ambiguous we may get
+              -- multiple answers, but we just pick one.
+              -- This should be OK, as the error should be
+              -- caught during actual renaming.
+
+          newEnv <- lift $ runBuild $
+                    moduleDefs (Nested mpath (nameIdent name)) nested
+          sets_ \o -> o { ownSubmodules = Map.insert name newEnv (ownSubmodules o)}
+          let newMPath = Nested mpath (nameIdent name)
+          collectNestedDeclsM newMPath newEnv (mDecls nested)
 
 --------------------------------------------------------------------------------
 
 
 
+
+--------------------------------------------------------------------------------
+-- Computes the names introduced by various declarations.
 
 instance Semigroup BuildNamingEnv where
   BuildNamingEnv a <> BuildNamingEnv b = BuildNamingEnv $
@@ -291,13 +333,15 @@ instance Monoid BuildNamingEnv where
     do ns <- sequence (map runBuild bs)
        return (mconcat ns)
 
---------------------------------------------------------------------------------
-
-
 
 -- | Things that define exported names.
 class BindsNames a where
   namingEnv :: a -> BuildNamingEnv
+
+
+
+
+
 
 instance BindsNames NamingEnv where
   namingEnv env = BuildNamingEnv (return env)
@@ -354,7 +398,7 @@ interpImportIface imp = interpImportEnv imp . unqualifiedEnv
 -- the names are qualified.
 unqualifiedEnv :: IfaceDecls -> NamingEnv
 unqualifiedEnv IfaceDecls { .. } =
-  mconcat [ exprs, tySyns, ntTypes, absTys, ntExprs, mods ]
+  mconcat [ exprs, tySyns, ntTypes, absTys, ntExprs, mods, sigs ]
   where
   toPName n = mkUnqual (nameIdent n)
 
@@ -375,6 +419,10 @@ unqualifiedEnv IfaceDecls { .. } =
 
   mods    = mconcat [ singletonNS NSModule (toPName n) n
                     | n <- Map.keys ifModules ]
+
+  sigs    = mconcat [ singletonNS NSSignature (toPName n) n
+                    | n <- Map.keys ifSignatures ]
+
 
 -- | Compute an unqualified naming environment, containing the various module
 -- parameters.
@@ -429,6 +477,15 @@ instance BindsNames (Module PName) where
 moduleDefs :: ModPath -> ModuleG mname PName -> BuildNamingEnv
 moduleDefs m Module { .. } = foldMap (namingEnv . InModule (Just m)) mDecls
 
+signatureDefs :: ModPath -> Signature PName -> BuildNamingEnv
+signatureDefs m sig =
+     mconcat [ namingEnv (InModule loc p) | p <- sigTypeParams sig ]
+  <> mconcat [ namingEnv (InModule loc p) | p <- sigFunParams sig ]
+  where
+  loc = Just m
+
+
+
 
 instance BindsNames (InModule (TopDecl PName)) where
   namingEnv (InModule ns td) =
@@ -457,8 +514,10 @@ instance BindsNames (InModule (NestedModule PName)) where
 instance BindsNames (InModule (Signature PName)) where
   namingEnv (InModule ~(Just m) sig) = BuildNamingEnv
     do let pname = sigName sig
-       nm <- newTop NSModule m (thing pname) Nothing (srcRange pname)
-       pure (singletonNS NSModule (thing pname) nm)
+       nm <- newTop NSSignature m (thing pname) Nothing (srcRange pname)
+       pure (singletonNS NSSignature (thing pname) nm)
+
+
 
 instance BindsNames (InModule (PrimType PName)) where
   namingEnv (InModule ~(Just m) PrimType { .. }) =

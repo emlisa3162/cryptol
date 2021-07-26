@@ -34,7 +34,7 @@ modExports m = fold (concat [ exportedNames d | d <- mDecls m ])
           NestedModule x ->
             [exportName NSModule nested { tlValue = thing (mName x) }]
       DModSig s ->
-        [ exportName NSModule s { tlValue = thing (sigName (tlValue s)) } ]
+        [ exportName NSSignature s { tlValue = thing (sigName (tlValue s)) } ]
       DModParam {} -> []
 
 
