@@ -1238,7 +1238,7 @@ helpCmd cmd
                separ = rPutStrLn "            ---------"
            sequence_ (intersperse separ helps)
 
-           when (null (vNames ++ tNames ++ mNames)) $
+           when (null (vNames ++ tNames ++ mNames ++ sNames)) $
              rPrint $ "Undefined name:" <+> pp qname
       Nothing ->
            rPutStrLn ("Unable to parse name: " ++ cmd)
@@ -1251,12 +1251,16 @@ helpCmd cmd
       M.Parameter  -> rPutStrLn "// No documentation is available."
 
 
-  showModHelp _env disp x =
-    rPrint $ runDoc disp $ vcat [ "`" <> pp x <> "` is a module." ]
+  showModHelp _env nameEnv x =
+    rPrint $ runDoc nameEnv $ vcat [ "`" <> pp x <> "` is a module." ]
     -- XXX: show doc. if any
 
-  showSigHelp _env disp x =
-    rPrint $ runDoc disp $ vcat [ "`" <> pp x <> "` is a signature." ]
+  showSigHelp env nameEnv name =
+    do rPrint $ runDoc nameEnv $ vcat [ "`" <> pp name <> "` is a signature." ]
+       fromMaybe (noInfo nameEnv name)
+         do s <- Map.lookup name (M.ifSignatures env)
+            d <- M.ifParamDoc s
+            pure (rPrint (pp d))
     -- XXX: show doc. if any, and maybe other stuff
 
   showTypeHelp params env nameEnv name =

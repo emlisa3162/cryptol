@@ -44,6 +44,7 @@ genIface m = Iface
     { ifParamTypes = mParamTypes m
     , ifParamConstraints = mParamConstraints m
     , ifParamFuns  = mParamFuns m
+    , ifParamDoc = Nothing
     }
   }
   where

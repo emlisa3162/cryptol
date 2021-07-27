@@ -93,6 +93,7 @@ data IfaceParams = IfaceParams
   { ifParamTypes       :: Map.Map Name ModTParam
   , ifParamConstraints :: [Located Prop] -- ^ Constraints on param. types
   , ifParamFuns        :: Map.Map Name ModVParam
+  , ifParamDoc         :: !(Maybe Text)
   } deriving (Show, Generic, NFData)
 
 noIfaceParams :: IfaceParams
@@ -100,6 +101,7 @@ noIfaceParams = IfaceParams
   { ifParamTypes = Map.empty
   , ifParamConstraints = []
   , ifParamFuns = Map.empty
+  , ifParamDoc = Nothing
   }
 
 isEmptyIfaceParams :: IfaceParams -> Bool
@@ -134,6 +136,7 @@ ifaceDeclsNames i = Set.unions [ Map.keysSet (ifTySyns i)
                                , Map.keysSet (ifAbstractTypes i)
                                , Map.keysSet (ifDecls i)
                                , Map.keysSet (ifModules i)
+                               , Map.keysSet (ifSignatures i)
                                ]
 
 

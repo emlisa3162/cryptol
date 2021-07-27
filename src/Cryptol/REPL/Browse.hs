@@ -24,6 +24,7 @@ browseModContext how mc = runDoc (env disp) (vcat sections)
   where
   sections =
     [ browseMParams (env disp) (mctxParams mc)
+    , browseSignatures disp decls
     , browseMods disp decls
     , browseTSyns disp decls
     , browsePrimTys disp decls
@@ -68,6 +69,11 @@ browseMods disp decls =
   -- might be better to do that with a separate command
 
 
+browseSignatures :: DispInfo -> IfaceDecls -> Doc
+browseSignatures disp decls =
+  ppSection disp "Signatures" ppS (Map.mapWithKey (,) (ifSignatures decls))
+  where
+  ppS (x,s) = "signature" <+> pp x
 
 
 browseTSyns :: DispInfo -> IfaceDecls -> Doc
